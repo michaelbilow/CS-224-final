@@ -27,73 +27,68 @@ def locations_to_peaks(locations, key_length, bp_error_probability=.02):
                               #  First term: leftover probability, second term: number of possible key_length strings
     bp_error_log_p = math.log(bp_error_probability)
 
-    peaks = [([(np.nan, np.nan)], 0,
-              ['K'], 0)]                      # Peaks have the form:
-                                              # [[list of start locations],
-                                              # log_probability,
-                                              # string of whether the match at this position is perfect or not,
-                                              # total read length]
-                                              # We initialize with np.nan to stand in for
-                                              # all other non-aligning sequences in the genome.
+    peaks = [([(np.nan,  np.nan, np.nan, np.nan)],   # Peaks have the form: [[list of start locations],
+                                                     #     start location = (chromosome index, start point, end point)
+              0,                                     # log_probability,
+              ['K'])]                                # string of whether the match at this position is perfect or not,
+
+                                                     # We initialize with np.nan to stand in for
+                                                     # all other non-aligning sequences in the genome.
     for i in range(len(locations)):
         location_list = locations[i]
-        default_error_probability = i*average_error_log_p
+        start_location_list = [x[:-1] for x in location_list]
+        default_error_log_p = i*average_error_log_p
         new_peaks = []
         for j in range(len(peaks)):
             peak = peaks[j]
             start_locs = peak[0]
             log_p = peak[1]
             match_qualities = peak[2]
-            match_length = peak[3]
-            current_start_loc = start_locs[-1]
-            current_start_chromosome, current_start_coord = current_start_loc
-            if current_start_loc in location_list:
-                new_start_locs = start_locs + [current_start_loc]
+            current_start_and_end_loc = start_locs[-1]          # The last start_loc is where the current one starts.
+            implied_start_loc = current_start_and_end_loc[:-1]  #
+            if implied_start_loc in start_location_list:
+                new_start_locs = start_locs + [current_start_and_end_loc]
                 new_log_p = log_p + exact_match_log_p
                 new_match_qualities = match_qualities + ['M']
-                new_match_length = match_length + key_length
-                new_peak = (new_start_locs, new_log_p, new_match_qualities, new_match_length)
+                new_peak = (new_start_locs, new_log_p, new_match_qualities)
                 new_peaks.append(new_peak)
             else:  # It may be an error or an indel
-                error_peak_start_locs = start_locs + [current_start_loc]
+                error_peak_start_locs = start_locs + [current_start_and_end_loc]
                 error_peak_log_p = log_p + average_error_log_p
                 error_match_quality = match_qualities + ['E']
-                error_match_length = match_length + key_length
-                error_peak = (error_peak_start_locs, error_peak_log_p, error_match_quality, error_match_length)
+                error_peak = (error_peak_start_locs, error_peak_log_p, error_match_quality)
                 new_peaks.append(error_peak)
-                indel_distances = [chromosome_distance(current_start_loc, loc) for loc in location_list]
+                indel_distances = [chromosome_signed_distance(implied_start_loc, loc) for loc in start_location_list]
                 indel_locations = [location_list[k] for k in range(len(location_list))
-                                   if indel_distances[k] < INDEL_CUTOFF]
+                                   if abs(indel_distances[k]) < INDEL_CUTOFF]
                 for indel_location in indel_locations:
                     ## Create new peaks with the indel, and one where it is interpreted as an error
                     indel_peak_start_locs = start_locs + [indel_location]
-                    indel_length = current_start_loc[1] - indel_location[1]
+                    indel_length = implied_start_loc[1] - indel_location[1]
                     indel_peak_log_p = log_p + exact_match_probability + indel_length * bp_error_log_p
                     if indel_length > 0:
                         indel_match_qualities = match_qualities + ['I' + str(indel_length)]
                     elif indel_length < 0:
                         indel_match_qualities = match_qualities + ['D' + str(abs(indel_length))]
-                    indel_match_length = match_length + key_length + indel_length
-                    indel_peak = (indel_peak_start_locs, indel_peak_log_p, indel_match_qualities, indel_match_length)
+                    indel_peak = (indel_peak_start_locs, indel_peak_log_p, indel_match_qualities)
                     new_peaks.append(indel_peak)
 
                     new_peaks += [indel_peak, error_peak]
 
         peaks = new_peaks
         if not peaks:
-            current_start_locations = [peak[0][-1] for peak in peaks]
+            current_locations = [peak[0][-1] for peak in peaks]
         else:
-            current_start_locations = []
-        unused_locations = set(location_list) - set(current_start_locations)
+            current_locations = []
+        unused_locations = set(location_list) - set(current_locations)
 
         for location in unused_locations:
             new_peak_start_locs = [location for x in range(i+1)]            # Assume the sequence starts right
                                                                             # at the unused location
-            new_peak_log_p = default_error_probability + exact_match_log_p  # Assume every sequence before was an error,
+            new_peak_log_p = default_error_log_p + exact_match_log_p        # Assume every sequence before was an error,
                                                                             # but the current one is correct
             new_match_qualities = ['E' for x in range(i)] + ['M']
-            new_match_length = key_length * (i + 1)
-            new_peak = (new_peak_start_locs, new_peak_log_p, new_match_qualities, new_match_length)
+            new_peak = (new_peak_start_locs, new_peak_log_p, new_match_qualities)
             peaks.append(new_peak)
 
         ## If two peaks have the same start and end, use only the one that has the greatest probability
@@ -110,7 +105,7 @@ def locations_to_peaks(locations, key_length, bp_error_probability=.02):
         peaks = peaks_dict.values()
     return peaks
 
-def chromosome_distance(loc1, loc2):
+def chromosome_signed_distance(loc1, loc2):
     """
     Computes a "chromosomal" distance between two locations of the form
     loc = (chromsome number, chromosome coordinate)
@@ -120,7 +115,7 @@ def chromosome_distance(loc1, loc2):
     if loc1[0] != loc2[0]:
         return np.inf
     else:
-        return abs(loc1[1] - loc2[1])
+        return loc1[1] - loc2[1]
 
 
 def map_end(read_end, key_length, genome_hash):
@@ -141,7 +136,11 @@ def map_end(read_end, key_length, genome_hash):
     for i in range(len(read_end)/key_length):
         offset = i*key_length
         key = read_end[offset: offset + key_length]
-        locations = [(start_loc[0], start_loc[1] - offset) for start_loc in genome_hash[key]]
+        locations = [(start_loc[0],                # The chromosome that the read is on
+                      start_loc[1] - offset,       # The "implied start location" of the read
+                      start_loc[1],                # The actual start location of the read
+                      start_loc[1] + key_length)   # The actual end of the read.
+                     for start_loc in genome_hash[key]]
         all_locations.append(locations)
     peaks = locations_to_peaks(all_locations, key_length)
     print all_locations
