@@ -126,7 +126,7 @@ def map_end(read_end, key_length, genome_hash):
     for p in peaks:
         print p
 
-    check_peaks_against_reference(peaks, read, read_length, reference)
+    check_peaks_against_reference(peaks, read_end, read_length, reference)
     return peaks
 
 def check_peaks_against_reference(peaks, read, read_length, reference):
@@ -202,9 +202,10 @@ def check_peaks_against_reference(peaks, read, read_length, reference):
             else:
                 raise
 
-            peak_CIGAR += CIGAR_append(peak_CIGAR,segment_CIGAR)
+            peak_CIGAR += CIGAR_append(peak_CIGAR, segment_CIGAR)
 
     return
+
 
 def CIGAR_append(start_CIGAR, new_CIGAR):
     """
@@ -213,7 +214,8 @@ def CIGAR_append(start_CIGAR, new_CIGAR):
 
     return
 
-def smith_waterman(read1,read2):
+
+def smith_waterman(read1, read2):
     """
     Does Smith-Waterman dynamic-programming alignment and returns the
     most likely global alignment of the reads read1 and read2, and
@@ -221,6 +223,7 @@ def smith_waterman(read1,read2):
     """
     cigar = ''
     return cigar
+
 
 def align_paired_peaks(peaks1, peaks2, read_length):
     """
@@ -233,8 +236,6 @@ def align_paired_peaks(peaks1, peaks2, read_length):
         iv)  ???
     3) None, indicating that the read does not align to the genome at all.
     """
-
-
 
 
     return
@@ -265,6 +266,7 @@ def map_read(paired_end_read, key_length, hash_table):
     output = pair_peaks(peaks1, peaks2)
     return
 
+
 def read_and_map_reads(reads_fn, key_length, genome_hash):
     """
     Maps a whole bunch of paired-end reads to a reference genome.
@@ -288,5 +290,7 @@ if __name__ == "__main__":
     ref_fn = os.path.join(input_folder, ref)
     reads_fn = os.path.join(input_folder, reads)
     key_length = 10
+    reference = read_reference(ref_fn)
     genome_hash = hash_reference(ref_fn, key_length)
+
     read_and_map_reads(reads_fn,key_length,genome_hash)
