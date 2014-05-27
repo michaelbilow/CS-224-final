@@ -14,8 +14,9 @@ MIN_DIST_BETWEEN_READS = 80
 MAX_DIST_BETWEEN_READS = 120
 INDEL_CUTOFF = 20
 SCORING = swalign.NucleotideScoringMatrix()
-ALIGNER = swalign.LocalAlignment(SCORING, globalalign=True, gap_penalty=5)
+ALIGNER = swalign.LocalAlignment(SCORING, globalalign=True, gap_penalty=-5)
 UPPERCASE = set(string.ascii_uppercase)
+
 
 def locations_to_peaks(locations, key_length, bp_error_probability=.02):
     """
@@ -101,11 +102,11 @@ def locations_to_peaks(locations, key_length, bp_error_probability=.02):
                 new_peak_history = [(match_location[0],
                                      match_location[1],
                                      match_location[1] + key_length * k,
-                                     match_location[1] + (key_length + 1) * k)
+                                     match_location[1] + key_length * (k+1))
                                     for k in range(i)]
                 new_peak_history += [match_location]
                 new_peak_log_p = default_error_log_p + exact_match_log_p
-                new_peak_match_qualities = ['E']*i + ['M']
+                new_peak_match_qualities = ['E'] * i + ['M']
                 new_peak = (new_peak_history, new_peak_log_p, new_peak_match_qualities)
                 new_peaks.append(new_peak)
 
@@ -164,13 +165,13 @@ def map_end(read_end, key_length, genome_hash):
                       start_loc[1] + key_length)  # The actual end of the read.
                      for start_loc in genome_hash[key]]
         all_locations.append(locations)
+        print locations
+    print
     peaks = locations_to_peaks(all_locations, key_length)
-    print all_locations
-
     for p in peaks:
         print p
-    print
-    # check_peaks_against_reference(peaks, read_end, reference)
+    print '\n'
+
     return peaks
 
 
@@ -184,8 +185,7 @@ def smith_waterman(peak, read, reference, key_length):
     """
 
     peak_history, log_p, match_qualities = peak
-    ref_start_point = peak_history[0][:1]
-
+    ref_start_point = peak_history[0][1]
 
     cigar_pieces = []
     ref_alignment_completed = ref_start_point
@@ -200,23 +200,24 @@ def smith_waterman(peak, read, reference, key_length):
         match_quality = match_qualities[i]
 
         if any(x in match_quality for x in "MDI"):
-            if ref_alignment_frontier != ref_alignment_completed:  ## We hit the end of a run of imperfect matches
-                ref_start_index = ref_alignment_completed
-                ref_end_index = current_start
-                ref_piece = reference[ref_start_index: ref_end_index]
+            ## If it's a match, end of an insertion, or deletion, we're definitely going to alignment
+            ## through the end of the current read
+
+            if ref_alignment_frontier != ref_alignment_completed or any(x in match_quality for x in "DI"):
+                read_alignment_frontier += key_length
+                ref_alignment_frontier = current_end
+                # We hit the end of a run of imperfect matches, or we hit an insertion or deletion.
+                ref_piece = reference[ref_alignment_completed: ref_alignment_frontier]
                 read_piece = read[read_alignment_completed: read_alignment_frontier]
                 new_alignment = ALIGNER.align(ref_piece, read_piece).extended_cigar_str
                 cigar_pieces.append(new_alignment)
-                ref_alignment_completed = ref_end_index
-                ref_alignment_frontier = ref_end_index
-                read_alignment_completed = read_alignment_frontier
             else:
-                pass
-            cigar_pieces.append('M' + str(key_length))
-            ref_alignment_completed += key_length
-            ref_alignment_frontier += key_length
-            read_alignment_completed += key_length
-            read_alignment_frontier += key_length
+                # We're in the middle of a run of perfect matches.
+                cigar_pieces.append(str(key_length) + 'M')
+                read_alignment_frontier += key_length
+                ref_alignment_frontier = current_end
+            ref_alignment_completed = ref_alignment_frontier
+            read_alignment_completed = read_alignment_frontier
         else:
             ref_alignment_frontier = current_end
             read_alignment_frontier += key_length
@@ -226,10 +227,10 @@ def smith_waterman(peak, read, reference, key_length):
                 new_alignment = ALIGNER.align(ref_piece, read_piece).extended_cigar_str
                 cigar_pieces.append(new_alignment)
 
-
     extended_cigar = roll(cigar_pieces)
 
     return extended_cigar
+
 
 def roll(cigar_pieces):
     """
@@ -237,27 +238,37 @@ def roll(cigar_pieces):
     correctly CIGAR-formatted string
     """
     rolled_cigar = ''
-    unfinished_piece = ()
+    unfinished_piece = ['', '']  # First coordinate is the run length second is the match type.
     for i in range(len(cigar_pieces)):
         cigar_piece = cigar_pieces[i]
         letter_indices = [x for x in range(len(cigar_piece)) if cigar_piece[x] in UPPERCASE]
+        first_match_type = cigar_piece[letter_indices[0]]
         if len(letter_indices) == 1:
-            this_match_type = letter_indices[]
-
+            first_match_run = int(cigar_piece[:letter_indices[0]])
+            if unfinished_piece[1] == first_match_type:
+                unfinished_piece[0] += first_match_run
+            else:
+                rolled_cigar += ''.join([str(x) for x in unfinished_piece])
+                unfinished_piece = [first_match_run, first_match_type]
         else:
+            first_match_run = int(cigar_piece[:letter_indices[0]])
+            middle_cigar_piece = cigar_piece[letter_indices[0] + 1: letter_indices[-2] + 1]
+            last_match_type_index = letter_indices[-1]
+            if unfinished_piece[1] == first_match_type:
+                unfinished_piece[0] += first_match_run
+                rolled_cigar += ''.join([str(x) for x in unfinished_piece])
+            else:
+                rolled_cigar += ''.join([str(x) for x in unfinished_piece])
+                rolled_cigar += ''.join([str(x) for x in (first_match_run, first_match_type)])
+            rolled_cigar += middle_cigar_piece
+            last_match_type = cigar_piece[last_match_type_index]
+            last_match_run = int(cigar_piece[letter_indices[-2] + 1: -1])
+            unfinished_piece = [last_match_run, last_match_type]
 
+        if i == len(cigar_pieces) - 1:
+            rolled_cigar += ''.join([str(x) for x in unfinished_piece])
 
-
-
-    return
-
-def align_paired_peaks(peak_pair, reference):
-    """
-    Does Smith-Waterman alignment and returns
-    1) The CIGAR output
-    2) Any
-    """
-    return
+    return rolled_cigar
 
 
 def pair_peaks(peaks1, peaks2, read_length):
@@ -270,8 +281,9 @@ def pair_peaks(peaks1, peaks2, read_length):
             start_loc2 = peak2[0][0]
             start_dist = abs(chromosome_signed_distance(start_loc1, start_loc2))
             if MIN_DIST_BETWEEN_READS <= start_dist - read_length <= MAX_DIST_BETWEEN_READS:  # This criteria should be
-                                                                                              # made flexible eventually
+                # made flexible eventually
                 peak_pairs.append((peak1, peak2))
+                break  # Because the peaks are sorted in order, we take the one with the highest probability.
     return peak_pairs
 
 
@@ -285,11 +297,20 @@ def map_read(paired_end_read, key_length, hash_table, reference):
     end2 = paired_end_read[1]
     peaks1 = map_end(end1, key_length, hash_table)
     peaks2 = map_end(end2, key_length, hash_table)
-    paired_peaks = pair_peaks(peaks1, peaks2, len(end1))
-    for peak in paired_peaks:
-        print peak
-    print
-    align_read(paired_peaks, paired_end_read)
+    paired_peaks_list = pair_peaks(peaks1, peaks2, len(end1))
+    if len(paired_peaks_list) == 0:
+        print 'No Alignment\n\n'
+    elif len(paired_peaks_list) != 1:
+        print 'BOOOOOOOOOPS\n\n\n\n\n\n'
+    else:
+        paired_peaks = paired_peaks_list[0]
+        print paired_peaks[0]
+        print paired_peaks[1]
+        alignment1 = smith_waterman(paired_peaks[0], end1, reference, key_length)
+        print end1, alignment1
+        alignment2 = smith_waterman(paired_peaks[1], end2, reference, key_length)
+        print end2, alignment2
+    print '------------------------\n\n'
     return
 
 
@@ -303,9 +324,12 @@ def read_and_map_reads(reads_fn, key_length, genome_hash, ref_seq):
         count = 0
         for line in reads_file:
             paired_end_read = line.strip().split(',')
-            map_read(paired_end_read, key_length, genome_hash, ref_seq)
+            print count
             count += 1
-            if count > 10:
+            if count <= 56:
+                continue
+            map_read(paired_end_read, key_length, genome_hash, ref_seq)
+            if count > 155:
                 break
 
 
