@@ -7,12 +7,15 @@ import numpy as np
 import math
 from collections import defaultdict
 import swalign
+import string
 
 
 MIN_DIST_BETWEEN_READS = 80
 MAX_DIST_BETWEEN_READS = 120
 INDEL_CUTOFF = 20
-
+SCORING = swalign.NucleotideScoringMatrix()
+ALIGNER = swalign.LocalAlignment(SCORING, globalalign=True, gap_penalty=5)
+UPPERCASE = set(string.ascii_uppercase)
 
 def locations_to_peaks(locations, key_length, bp_error_probability=.02):
     """
@@ -166,134 +169,113 @@ def map_end(read_end, key_length, genome_hash):
 
     for p in peaks:
         print p
-
+    print
     # check_peaks_against_reference(peaks, read_end, reference)
     return peaks
 
 
-def check_peaks_against_reference(peaks, read, reference):
-    """
-    Using the peaks as a guide, we check the read against the reference.
-    First, we set a cutoff for the quality of the alignment
-      that is, it must be at least more likely than the average likelihood
-      of an entire random genome aligning to this particular read.
-
-      That probability is |N|*p_0, where p_0 is the probability that
-      nothing aligns. ----Eh, I'm not sure about this number yet, but it seems like a good cutoff for now.
-
-    Once the peaks have been filtered, each peak is attempted to be aligned with the
-    genome. Perfectly-matching strings are skipped, and imperfectly matching strings are mapped using
-    a Smith-Waterman dynamic programming algorithm.
-    """
-    null_alignment_log_p = min([peak[1] for peak in peaks])
-    ref_length = len(reference)
-    log_p_cutoff = math.log(ref_length) + null_alignment_log_p
-    peaks = [peak for peak in peaks if peak[1] > log_p_cutoff]
-
-    for peak in peaks:
-        peak_CIGAR = ''
-        unaligned_ref_start = np.nan
-        unaligned_ref_end = np.nan
-        unaligned_read_start = np.nan
-        unaligned_read_end = np.nan
-        offsets = peak[0]
-        for i in range(len(offsets)):
-            read_start = i * read_length
-            offset = offsets[i]
-            alignment_start = offset + read_start
-            alignment_quality = peak[2][i]
-            if alignment_quality == 'E':
-                if unaligned_read_start is np.nan:
-                    unaligned_ref_start = alignment_start
-                    unaligned_read_start = read_start
-                else:
-                    pass
-
-                if i == len(offsets) - 1:
-                    unaligned_ref_end = alignment_start + read_length  # Note that it is not necessarily the
-                    # case that the unaligned
-                    # read should end exactly where the alignment
-                    # ends, but fuck it for now.
-                    unaligned_read_end = read_start + read_length
-
-                    ref_seq = reference[unaligned_ref_start: unaligned_ref_end]
-                    read_seq = read[unaligned_read_start: unaligned_read_end]
-
-                    segment_CIGAR = smith_waterman(ref_seq, read_seq)
-                    unaligned_read_start = np.nan
-                    unaligned_read_end = np.nan
-
-                else:
-                    segment_CIGAR = ''
-            else:  # First, clear the error-reads if necessary
-                unaligned
-
-            if alignment_quality == 'M':
-                if unaligned_read_start is not np.nan:
-                    segment_CIGAR = smith_waterman(unaligned_read_start, unaligned_read_end, reference)
-                else:
-                    segment_CIGAR = ''
-                segment_CIGAR += 'M' + str(read_length)
-            elif alignment_quality == 'E':
-                segment_CIGAR = smith_waterman()
-            elif any(x in alignment_quality for x in ('I', 'D')):  # If an insertion or deletion was noticed,
-                indel_length = int(alignment_quality[1:])  # check that there is a record of the indel
-                # earlier in the peak_CIGAR.
-                segment_CIGAR = 'M' + str(read_length)
-            else:
-                raise
-
-            peak_CIGAR += CIGAR_append(peak_CIGAR, segment_CIGAR)
-
-    return
-
-
-def CIGAR_append(start_CIGAR, new_CIGAR):
-    """
-    Appends the CIGAR-formatted
-    """
-
-    return
-
-
-def smith_waterman(read1, read2):
+def smith_waterman(peak, read, reference, key_length):
     """
     Does Smith-Waterman dynamic-programming alignment and returns the
     most likely global alignment of the reads read1 and read2, and
     returns the CIGAR representation of the output
-    """
-    cigar = ''
-    return cigar
 
-
-def align_paired_peaks(peaks1, peaks2, read_length):
-    """
-    Aligns pairs of peaks, and returns ONE of the following:
-    1) the sequence of aligned points for the two reads plus the exact distance between the reads
-    2) a flag indicating that the read looks like it aligns, but not in a clean way, for example
-        i) One end aligns well, the other doesn't
-        ii) Both reads align well, but the distance between them is too large
-        iii) There are multiple potential alignments that are about equally good.
-        iv)  ???
-    3) None, indicating that the read does not align to the genome at all.
+    Only performs alignment between perfectly matching pieces.
     """
 
+    peak_history, log_p, match_qualities = peak
+    ref_start_point = peak_history[0][:1]
+
+
+    cigar_pieces = []
+    ref_alignment_completed = ref_start_point
+    ref_alignment_frontier = ref_start_point
+    read_alignment_completed = 0
+    read_alignment_frontier = 0
+
+    for i in range(len(peak_history)):
+        current_piece = peak_history[i]
+        current_start = current_piece[2]
+        current_end = current_piece[3]
+        match_quality = match_qualities[i]
+
+        if any(x in match_quality for x in "MDI"):
+            if ref_alignment_frontier != ref_alignment_completed:  ## We hit the end of a run of imperfect matches
+                ref_start_index = ref_alignment_completed
+                ref_end_index = current_start
+                ref_piece = reference[ref_start_index: ref_end_index]
+                read_piece = read[read_alignment_completed: read_alignment_frontier]
+                new_alignment = ALIGNER.align(ref_piece, read_piece).extended_cigar_str
+                cigar_pieces.append(new_alignment)
+                ref_alignment_completed = ref_end_index
+                ref_alignment_frontier = ref_end_index
+                read_alignment_completed = read_alignment_frontier
+            else:
+                pass
+            cigar_pieces.append('M' + str(key_length))
+            ref_alignment_completed += key_length
+            ref_alignment_frontier += key_length
+            read_alignment_completed += key_length
+            read_alignment_frontier += key_length
+        else:
+            ref_alignment_frontier = current_end
+            read_alignment_frontier += key_length
+            if i == len(peak_history) - 1:
+                ref_piece = reference[ref_alignment_completed:ref_alignment_frontier]
+                read_piece = read[read_alignment_completed:]
+                new_alignment = ALIGNER.align(ref_piece, read_piece).extended_cigar_str
+                cigar_pieces.append(new_alignment)
+
+
+    extended_cigar = roll(cigar_pieces)
+
+    return extended_cigar
+
+def roll(cigar_pieces):
+    """
+    Joins multiple CIGAR-formatted things together into a single
+    correctly CIGAR-formatted string
+    """
+    rolled_cigar = ''
+    unfinished_piece = ()
+    for i in range(len(cigar_pieces)):
+        cigar_piece = cigar_pieces[i]
+        letter_indices = [x for x in range(len(cigar_piece)) if cigar_piece[x] in UPPERCASE]
+        if len(letter_indices) == 1:
+            this_match_type = letter_indices[]
+
+        else:
+
+
+
+
+    return
+
+def align_paired_peaks(peak_pair, reference):
+    """
+    Does Smith-Waterman alignment and returns
+    1) The CIGAR output
+    2) Any
+    """
     return
 
 
 def pair_peaks(peaks1, peaks2, read_length):
+    peaks1 = sorted(peaks1, key=lambda x: -x[1])
+    peaks2 = sorted(peaks2, key=lambda x: -x[1])
     peak_pairs = []
     for peak1 in peaks1:
         for peak2 in peaks2:
-            start_dist = abs(peak2[0] - peak1[0])
-            if MIN_DIST_BETWEEN_READS <= start_dist <= MAX_DIST_BETWEEN_READS:  # This criteria should be
-                # made flexible eventually.
-
+            start_loc1 = peak1[0][0]
+            start_loc2 = peak2[0][0]
+            start_dist = abs(chromosome_signed_distance(start_loc1, start_loc2))
+            if MIN_DIST_BETWEEN_READS <= start_dist - read_length <= MAX_DIST_BETWEEN_READS:  # This criteria should be
+                                                                                              # made flexible eventually
                 peak_pairs.append((peak1, peak2))
     return peak_pairs
 
 
-def map_read(paired_end_read, key_length, hash_table):
+def map_read(paired_end_read, key_length, hash_table, reference):
     """
     Maps a single paired-end read to the genome.
     Each end is mapped to a set of "probabilistic" peaks (the numbers aren't really probabilities)
@@ -303,11 +285,15 @@ def map_read(paired_end_read, key_length, hash_table):
     end2 = paired_end_read[1]
     peaks1 = map_end(end1, key_length, hash_table)
     peaks2 = map_end(end2, key_length, hash_table)
-    # output = pair_peaks(peaks1, peaks2)
+    paired_peaks = pair_peaks(peaks1, peaks2, len(end1))
+    for peak in paired_peaks:
+        print peak
+    print
+    align_read(paired_peaks, paired_end_read)
     return
 
 
-def read_and_map_reads(reads_fn, key_length, genome_hash):
+def read_and_map_reads(reads_fn, key_length, genome_hash, ref_seq):
     """
     Maps a whole bunch of paired-end reads to a reference genome.
     """
@@ -317,9 +303,9 @@ def read_and_map_reads(reads_fn, key_length, genome_hash):
         count = 0
         for line in reads_file:
             paired_end_read = line.strip().split(',')
-            map_read(paired_end_read, key_length, genome_hash)
+            map_read(paired_end_read, key_length, genome_hash, ref_seq)
             count += 1
-            if count > 0:
+            if count > 10:
                 break
 
 
@@ -331,6 +317,7 @@ if __name__ == "__main__":
     reads_fn = os.path.join(input_folder, reads)
     key_size = 10
     index, seq = read_chromosome(ref_fn)
+    seq_dict = {index: seq}
     my_hash = hash_chromosome(index, seq, key_size)
 
-    read_and_map_reads(reads_fn, key_size, my_hash)
+    read_and_map_reads(reads_fn, key_size, my_hash, seq)
