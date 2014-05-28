@@ -165,12 +165,12 @@ def map_end(read_end, key_length, genome_hash):
                       start_loc[1] + key_length)  # The actual end of the read.
                      for start_loc in genome_hash[key]]
         all_locations.append(locations)
-        print locations
-    print
+    #     print locations
+    # print
     peaks = locations_to_peaks(all_locations, key_length)
-    for p in peaks:
-        print p
-    print '\n'
+    # for p in peaks:
+    #     print p
+    # print '\n'
 
     return peaks
 
@@ -284,6 +284,9 @@ def pair_peaks(peaks1, peaks2, read_length):
                 # made flexible eventually
                 peak_pairs.append((peak1, peak2))
                 break  # Because the peaks are sorted in order, we take the one with the highest probability.
+    # Again, probably want to do something more clever with this later, but for now we'll take the max likelihood peak
+    peak_pairs = sorted(peak_pairs, key=lambda x: -x[0][1] + -x[1][1])
+    peak_pairs = peak_pairs[:1]
     return peak_pairs
 
 
@@ -301,42 +304,58 @@ def map_read(paired_end_read, key_length, hash_table, reference):
     if len(paired_peaks_list) == 0:
         print 'No Alignment\n\n'
     elif len(paired_peaks_list) != 1:
-        print 'BOOOOOOOOOPS\n\n\n\n\n\n'
+        pass
+        # print 'BOOOOOOOOOPS\n\n\n\n\n\n'
     else:
         paired_peaks = paired_peaks_list[0]
-        print paired_peaks[0]
-        print paired_peaks[1]
+        # print paired_peaks[0]
+        # print paired_peaks[1]
         alignment1 = smith_waterman(paired_peaks[0], end1, reference, key_length)
-        print end1, alignment1
+        # print end1, alignment1
         alignment2 = smith_waterman(paired_peaks[1], end2, reference, key_length)
-        print end2, alignment2
-    print '------------------------\n\n'
-    return
+    #     print end2, alignment2
+    # print '------------------------\n\n'
+
+    output1 = paired_peaks[0][0][0][:2], end1, alignment1  # Start point, read, CIGAR
+    output2 = paired_peaks[1][0][0][:2], end2, alignment2
+    return output1, output2
 
 
-def read_and_map_reads(reads_fn, key_length, genome_hash, ref_seq):
+def read_and_map_reads(reads_fn, key_length, genome_hash, ref_seq, pileup_fn):
     """
     Maps a whole bunch of paired-end reads to a reference genome.
     """
+    pileup = []
     with open(reads_fn, 'r') as reads_file:
         reads_file.readline()
         reads_file.readline()
         count = 0
         for line in reads_file:
             paired_end_read = line.strip().split(',')
-            print count
+            # print count
             count += 1
-            if count <= 56:
-                continue
-            map_read(paired_end_read, key_length, genome_hash, ref_seq)
-            if count > 155:
-                break
+            # if count <= 102:
+            #     continue
+            mapped1, mapped2 = map_read(paired_end_read, key_length, genome_hash, ref_seq)
+            if mapped1:
+                pileup.append(mapped1)
+            if mapped2:
+                pileup.append(mapped2)
+            # if count > 155:
+            #     break
+    sorted_pileup = sorted(pileup, key=lambda x: x[0]) ## Sort the pileup list by start position
+    with open(pileup_fn, 'w') as pileup_file:
+        for row in sorted_pileup:
+            row_str = '\t'.join([str(x) for x in row]) + '\n'
+            pileup_file.write(row_str)
+    return
 
 
 if __name__ == "__main__":
     input_folder = './EE_genome'
     ref = 'ref/ref_genomeEExample.txt'
     reads = 'reads/reads_genomeEExample.txt'
+    pileup_fn = os.path.join(input_folder, 'pileup.txt')
     ref_fn = os.path.join(input_folder, ref)
     reads_fn = os.path.join(input_folder, reads)
     key_size = 10
@@ -344,4 +363,4 @@ if __name__ == "__main__":
     seq_dict = {index: seq}
     my_hash = hash_chromosome(index, seq, key_size)
 
-    read_and_map_reads(reads_fn, key_size, my_hash, seq)
+    read_and_map_reads(reads_fn, key_size, my_hash, seq, pileup_fn)
