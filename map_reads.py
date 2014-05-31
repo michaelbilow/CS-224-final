@@ -302,7 +302,8 @@ def map_read(paired_end_read, key_length, hash_table, reference):
     peaks2 = map_end(end2, key_length, hash_table)
     paired_peaks_list = pair_peaks(peaks1, peaks2, len(end1))
     if len(paired_peaks_list) == 0:
-        print 'No Alignment\n\n'
+        # print 'No Alignment\n\n'
+        return None, None
     elif len(paired_peaks_list) != 1:
         pass
         # print 'BOOOOOOOOOPS\n\n\n\n\n\n'
@@ -332,7 +333,7 @@ def read_and_map_reads(reads_fn, key_length, genome_hash, ref_seq, pileup_fn):
         count = 0
         for line in reads_file:
             paired_end_read = line.strip().split(',')
-            # print count
+            print count
             count += 1
             # if count <= 102:
             #     continue
@@ -352,9 +353,9 @@ def read_and_map_reads(reads_fn, key_length, genome_hash, ref_seq, pileup_fn):
 
 
 if __name__ == "__main__":
-    input_folder = './EE_genome'
-    ref = 'ref/ref_genomeEExample.txt'
-    reads = 'reads/reads_genomeEExample.txt'
+    input_folder = './W1_genome'
+    ref = 'ref/ref_genomeW1.txt'
+    reads = 'reads/reads_genomeW1.txt'
     pileup_fn = os.path.join(input_folder, 'pileup.txt')
     ref_fn = os.path.join(input_folder, ref)
     reads_fn = os.path.join(input_folder, reads)
