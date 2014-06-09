@@ -40,7 +40,7 @@ def hash_chromosome(chromosome_id, chromosome_seq, key_length):
 
 
 if __name__ == "__main__":
-    input_folder = './EE_genome'
+    input_folder = './EExample_genome'
     ref = 'ref/ref_genomeEExample.txt'
     ref_fn = os.path.join(input_folder, ref)
     key_size = 10

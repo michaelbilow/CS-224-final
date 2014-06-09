@@ -14,7 +14,7 @@ MIN_DIST_BETWEEN_READS = 80
 MAX_DIST_BETWEEN_READS = 120
 INDEL_CUTOFF = 20
 SCORING = swalign.NucleotideScoringMatrix()
-ALIGNER = swalign.LocalAlignment(SCORING, globalalign=True, gap_penalty=-5)
+ALIGNER = swalign.LocalAlignment(SCORING, globalalign=True, gap_penalty=-2)
 UPPERCASE = set(string.ascii_uppercase)
 
 
@@ -333,7 +333,7 @@ def read_and_map_reads(reads_fn, key_length, genome_hash, ref_seq, pileup_fn):
         count = 0
         for line in reads_file:
             paired_end_read = line.strip().split(',')
-            print count
+            # print count
             count += 1
             # if count <= 102:
             #     continue
